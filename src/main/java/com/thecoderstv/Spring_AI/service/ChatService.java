@@ -7,15 +7,29 @@ import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.StreamingChatModel;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.image.ImageGeneration;
+import org.springframework.ai.image.ImageModel;
+import org.springframework.ai.image.ImagePrompt;
+import org.springframework.ai.image.ImageResponse;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 public class ChatService {
     @Autowired
     private ChatModel chatModel;
 
+    @Autowired
+    private ImageModel imageModel;
     @Autowired
     private StreamingChatModel streamingChatModel;
 
@@ -27,12 +41,11 @@ public class ChatService {
         return streamingChatModel.stream(inputText);
     }
 
-    public CricketResponse generateCricketResponse(String inputText) throws JsonProcessingException {
-        String promptString = "As a cricket expert, answer the following question: \"" + inputText + "\". " +
-                "If the question is not related to cricket, reply with a cricket-related joke saying it's off-topic. " +
-                "Respond in JSON format with a single key 'content' and your response as the value.";
+    public CricketResponse generateCricketResponse(String inputText) throws IOException {
+        String prompt = this.loadPromptTemplate("prompts/cricket_prompt.txt");
+        String finalPrompt = this.putValuesInPromptTemplate(prompt, Map.of("inputText", inputText));
 
-        ChatResponse cricketResponse = chatModel.call(new Prompt(promptString));
+        ChatResponse cricketResponse = chatModel.call(new Prompt(finalPrompt));
 
         String responseText = cricketResponse.getResult().getOutput().getText();
 
@@ -41,5 +54,28 @@ public class ChatService {
 
         ObjectMapper mapper = new ObjectMapper();
         return mapper.readValue(json, CricketResponse.class);
+    }
+
+    public List<String> generateImages(String imageDescription, String size, int numberOfImages) throws IOException {
+        String prompt = this.loadPromptTemplate("prompts/image_generation.txt");
+        String finalPrompt = this.putValuesInPromptTemplate(prompt, Map.of(
+                "numberOfImages", numberOfImages + " ",
+                "description", imageDescription + " ",
+                "size", size
+        ));
+        ImageResponse imageResponse = imageModel.call(new ImagePrompt(finalPrompt));
+        return imageResponse.getResults().stream().map(generation -> generation.getOutput().getUrl()).collect(Collectors.toList());
+    }
+
+    public String loadPromptTemplate(String fileName) throws IOException {
+        Path filePath = new ClassPathResource(fileName).getFile().toPath();
+        return Files.readString(filePath);
+    }
+
+    public String putValuesInPromptTemplate(String template, Map<String, String> values) {
+        for (Map.Entry<String, String> entry : values.entrySet()) {
+            template = template.replace("{" + entry.getKey() + "}", entry.getValue());
+        }
+        return template;
     }
 }
